@@ -7,6 +7,7 @@
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>  // ← 必ず必要！
 #include "esp_task_wdt.h"  // Watchdog追加
+#include "esp_sleep.h"  // 追加
 
 
 WebSocketsClient webSocket;
@@ -48,7 +49,7 @@ int ECPower = 33;               // OUTPUT
 
 // タイマー
 unsigned long lastSendTime = 0;
-const unsigned long sendInterval = 60000;
+const unsigned long sendInterval = 60000; // 1分
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -146,22 +147,22 @@ void sendSensorData();     // ← 追加
 void sendWaterLevel();     // ← 追加
 
 void loop() {
-  // ✅ Watchdogのキック
+  // deep sleep前提のため、1回だけ実行してsleepへ
   esp_task_wdt_reset();
 
-  // WebSocket維持
   webSocket.loop();
 
-  // 送信タイミング確認
-  unsigned long now = millis();
-  if (now - lastSendTime > sendInterval) {
-    sendSensorData();
-    sendWaterLevel();
-    lastSendTime = now;
-  }
+  sendSensorData();
+  sendWaterLevel();
 
-  // 必要に応じて短い遅延
-  delay(10);
+  // 必要ならシリアル出力の完了待ち
+  Serial.flush();
+
+  // 1分後に自動復帰
+  esp_sleep_enable_timer_wakeup(sendInterval * 1000); // μs単位
+  esp_deep_sleep_start();
+
+  // ここには戻らない
 }
 
 // 温度情報の取得
