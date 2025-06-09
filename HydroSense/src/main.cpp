@@ -93,76 +93,46 @@ void setupOTA() {
 void setup() {
   Serial.begin(115200);
 
-  // 固定IP設定
   if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
     Serial.println("STA Failed to configure");
   }
 
   WiFi.begin(ssid, password);
+  unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
     delay(500);
+    if (millis() - wifiStart > 10000) { // 10秒で諦めてリセット
+      ESP.restart();
+    }
   }
-  Serial.println();
-  Serial.print("Connected! IP address: ");
-  Serial.println(WiFi.localIP());
 
-  // WebSocket初期化
-  webSocket.begin(ws_host, ws_port, ws_path);
-  webSocket.onEvent(webSocketEvent);
-  webSocket.setReconnectInterval(5000);
-
-  // OTAタスク起動（コア0で）
-  setupOTA();
-  xTaskCreatePinnedToCore(
-    otaTask,
-    "OTA_Task",
-    4096,
-    NULL,
-    1,
-    NULL,
-    0
-  );
-
-  // EC・水位ピン初期化
   pinMode(ECPin1, INPUT);
   pinMode(ECPower, OUTPUT);
   pinMode(ECGround, OUTPUT);
   digitalWrite(ECGround, LOW);
   delay(100);
 
-  // 温度センサー初期化
   sensors.begin();
 
-  // ✅ Watchdog設定（8秒以内にリセットしないとリブート）
-  esp_task_wdt_init(8, true);   // 8秒タイムアウト、有効化
-  esp_task_wdt_add(NULL);       // 現在のタスク（loop）に割り当て
+  esp_task_wdt_init(8, true);
+  esp_task_wdt_add(NULL);
 
-  // 初期化（ESP32では明示的なシード設定は不要ですが、任意で加えてもOK）
   randomSeed(esp_random());
-
 }
 
 void sendSensorData();     // ← 追加
 void sendWaterLevel();     // ← 追加
 
 void loop() {
-  // deep sleep前提のため、1回だけ実行してsleepへ
   esp_task_wdt_reset();
-
-  webSocket.loop();
 
   sendSensorData();
   sendWaterLevel();
 
-  // 必要ならシリアル出力の完了待ち
   Serial.flush();
 
-  // 1分後に自動復帰
-  esp_sleep_enable_timer_wakeup(sendInterval * 1000); // μs単位
+  esp_sleep_enable_timer_wakeup(sendInterval * 1000);
   esp_deep_sleep_start();
-
-  // ここには戻らない
 }
 
 // 温度情報の取得
