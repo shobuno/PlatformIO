@@ -38,13 +38,15 @@ IPAddress secondaryDNS(8, 8, 4, 4);
 const char* serverUrl = "http://192.168.0.2:3000/api/sensor";
 const char* waterLevelUrl = "http://192.168.0.2:3000/api/water-level";
 
-// センサーピン
+// 温度センサーピン
 #define ONE_WIRE_BUS 13
 int ECPin1 = 34;                // INPUT EC1
 int ECGround = 25;              // OUTPUT
 int ECPower = 33;               // OUTPUT
+
+// 水位センサーのピン設定（仮実装）
 #define WATER_LEVEL_PIN_1 5
-#define WATER_LEVEL_PIN_2 17
+#define WATER_LEVEL_PIN_2 16
 #define WATER_LEVEL_PIN_3 17
 
 // タイマー
@@ -92,7 +94,7 @@ void setupOTA() {
 
 void setup() {
   Serial.begin(115200);
-
+  Serial.println("setup start");
   if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
     Serial.println("STA Failed to configure");
   }
@@ -126,8 +128,8 @@ void sendWaterLevel();     // ← 追加
 void loop() {
   esp_task_wdt_reset();
 
-  sendSensorData();
-  sendWaterLevel();
+  sendSensorData(); // センサーデータを送信
+  sendWaterLevel(); // 水位データを送信
 
   Serial.flush();
 
@@ -179,6 +181,7 @@ void getECvalue(){
 }
 
 void sendSensorData() {
+
   getMyTemperature();
   // 温度センサーの値を取得
 
@@ -210,10 +213,14 @@ void sendSensorData() {
 }
 
 void sendWaterLevel() {
-  //int level = digitalRead(WATER_LEVEL_PIN); // 0～3の値なら analogRead に変更する
-  // 仮実装　とりあえずランダムな値を生成
-  int level = random(0, 4);  // 0以上4未満 → 0, 1, 2, 3
+  int level1 = digitalRead(WATER_LEVEL_PIN_1); // 0～3の値なら analogRead に変更する
+  int level2 = digitalRead(WATER_LEVEL_PIN_2); // 0～3の値なら analogRead に変更する
+  int level3 = digitalRead(WATER_LEVEL_PIN_3); // 0～3の値なら analogRead に変更する
+  Serial.println("Water Level Pins: " + String(level1) + ", " + String(level2) + ", " + String(level3));
+  // 水位センサーの値を取得
 
+  int level = 3;
+  level = level - (level1 + level2 + level3); // 水位センサーの値を反転
 
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
@@ -229,4 +236,5 @@ void sendWaterLevel() {
     //Serial.printf("POST /water-level result: %d\n", res);
     http.end();
   }
+ 
 }
