@@ -116,8 +116,8 @@ void sendRelayState(int index, bool state) {
 // --- Breatheアニメーション処理 ---
 void breatheTask(void* parameter) {
   int index = (int)(uintptr_t)parameter;
-  const int max_brightness = 40;
-  const int delay_ms = 20;
+  const int max_brightness = 30;
+  const int delay_ms = 60;
 
   while (true) {
     if (!relayStates[index]) {
@@ -131,8 +131,9 @@ void breatheTask(void* parameter) {
         pixels.show();
         delay(delay_ms);
       }
+      delay(delay_ms * 100); // 少し待機
     } else {
-      pixels.setPixelColor(index, pixels.Color(200, 200, 200));
+      pixels.setPixelColor(index, pixels.Color(80, 80, 80));
       pixels.show();
       delay(100);
     }
@@ -145,7 +146,7 @@ void handleRelay(int index, bool state) {
   digitalWrite(relayPins[index], state ? HIGH : LOW);
   relayStates[index] = state;
   if (state) {
-    pixels.setPixelColor(index, pixels.Color(200, 200, 200));
+    pixels.setPixelColor(index, pixels.Color(80, 80, 80));
     pixels.show();
   }
   String log = "Relay " + String(index) + (state ? " ON" : " OFF");
@@ -155,7 +156,7 @@ void handleRelay(int index, bool state) {
 
 // --- 点滅処理 ---
 void handleBlink(int index) {
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 10; i++) {
     pixels.setPixelColor(index, pixels.Color(255, 255, 0)); // 黄色
     pixels.show(); delay(300);
     pixels.setPixelColor(index, pixels.Color(0, 0, 0));     // 消灯
