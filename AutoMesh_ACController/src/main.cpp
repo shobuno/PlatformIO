@@ -6,12 +6,17 @@
 #include <ArduinoJson.h>
 #include <EEPROM.h>
 #include <Adafruit_NeoPixel.h>
+#include <esp_task_wdt.h>  // 追加
+
+#define WDT_TIMEOUT 10  // 秒
 
 // --- プロトタイプ宣言 ---
 void webSocketEvent(WStype_t type, uint8_t* payload, size_t length);
 void reconnectWebSocket();
 bool isDeviceRegistered();
 void breatheTask(void* parameter);
+void loadRelayStatesFromEEPROM();  // ←追加
+void saveRelayStatesToEEPROM();    // ←追加
 
 // --- Wi-Fi設定 ---
 const char* ssid = "F4239C66A319-5G";
@@ -27,6 +32,7 @@ IPAddress secondaryDNS(8, 8, 4, 4);
 // --- EEPROM設定 ---
 #define EEPROM_SIZE 64
 #define EEPROM_REGISTERED_ADDR 0
+#define EEPROM_RELAY_STATE_ADDR 1  // 追加: リレー状態保存用
 
 // --- WebSocket設定 ---
 WebSocketsClient webSocket;
@@ -51,6 +57,10 @@ void setup() {
   Serial.begin(115200);
   EEPROM.begin(EEPROM_SIZE);
 
+  // --- WDT初期化 ---
+  esp_task_wdt_init(WDT_TIMEOUT, true);
+  esp_task_wdt_add(NULL);
+
   if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
     Serial.println("❌ STA config failed");
   }
@@ -62,13 +72,15 @@ void setup() {
   Serial.println();
   Serial.println("✅ Connected! IP: " + WiFi.localIP().toString());
 
+  loadRelayStatesFromEEPROM(); // リレー状態をEEPROMから復元
+
   pixels.begin();
   pixels.clear();
   pixels.show();
 
   for (int i = 0; i < NUM_RELAYS; i++) {
     pinMode(relayPins[i], OUTPUT);
-    digitalWrite(relayPins[i], LOW);
+    digitalWrite(relayPins[i], relayStates[i] ? HIGH : LOW); // EEPROM復元値で初期化
     xTaskCreatePinnedToCore(breatheTask, ("breathe_" + String(i)).c_str(), 2048, (void*)(uintptr_t)i, 1, &breatheTasks[i], 1);
   }
 
@@ -88,6 +100,7 @@ void setup() {
 void loop() {
   webSocket.loop();
   ArduinoOTA.handle();
+  esp_task_wdt_reset(); // WDTリセット
 }
 
 // --- EEPROM関連 ---
@@ -103,6 +116,19 @@ void clearDeviceRegistration() {
   EEPROM.write(EEPROM_REGISTERED_ADDR, 0);
   EEPROM.commit();
   Serial.println("🧹 clearDeviceRegistration");
+}
+
+void saveRelayStatesToEEPROM() {
+  for (int i = 0; i < NUM_RELAYS; i++) {
+    EEPROM.write(EEPROM_RELAY_STATE_ADDR + i, relayStates[i] ? 1 : 0);
+  }
+  EEPROM.commit();
+}
+
+void loadRelayStatesFromEEPROM() {
+  for (int i = 0; i < NUM_RELAYS; i++) {
+    relayStates[i] = EEPROM.read(EEPROM_RELAY_STATE_ADDR + i) == 1;
+  }
 }
 
 // --- リレー状態送信 ---
@@ -145,6 +171,7 @@ void handleRelay(int index, bool state) {
   if (index < 0 || index >= NUM_RELAYS) return;
   digitalWrite(relayPins[index], state ? HIGH : LOW);
   relayStates[index] = state;
+  saveRelayStatesToEEPROM(); // 状態を保存
   if (state) {
     pixels.setPixelColor(index, pixels.Color(80, 80, 80));
     pixels.show();
