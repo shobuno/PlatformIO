@@ -205,9 +205,12 @@ void sendSensorData() {
     json += "\"ecAnalogValue\":" + String(ecAnalog);
     json += "}";
 
-    //Serial.println("Senddata:" + json);
+    Serial.println("Senddata:" + json);
+    
     int res = http.POST(json);
+    String response = http.getString();
     Serial.printf("POST /sensor result: %d\n", res);
+    Serial.println("Response body: " + response);
     http.end();
   }
 }
