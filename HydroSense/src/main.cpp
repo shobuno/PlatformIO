@@ -5,14 +5,15 @@
 #include <DallasTemperature.h>
 #include <ArduinoOTA.h>
 #include <WebSocketsClient.h>
-#include <ArduinoJson.h>  // ← 必ず必要！
-#include "esp_task_wdt.h"  // Watchdog追加
-#include "esp_sleep.h"  // 追加
-
+#include <ArduinoJson.h>
+#include <Adafruit_ADS1X15.h>  // 追加
+#include "esp_task_wdt.h"
+#include "esp_sleep.h"
 
 WebSocketsClient webSocket;
+Adafruit_ADS1115 ads;  // 追加
 
-const char* ws_host = "192.168.0.2";  // ←適宜設定
+const char* ws_host = "192.168.0.2";
 const uint16_t ws_port = 3000;
 const char* ws_path = "/ws";
 
@@ -22,36 +23,26 @@ String serNo_1 = "";
 String serNo_2 = "";
 float ecAnalog = 0.0;
 
-
-// Wi-Fi設定
 const char* ssid = "F4239C66A319-5G";
 const char* password = "er7hmxby57akes";
 
-// 固定IP設定（自分のネットワーク環境に合わせて変更）
-IPAddress local_IP(192, 168, 0, 20);     // ← 固定したいIP
-IPAddress gateway(192, 168, 0, 1);        // ← 通常はルーターのIP
-IPAddress subnet(255, 255, 255, 0);       // ← 一般的な設定
-IPAddress primaryDNS(8, 8, 8, 8);         // ← 任意（Google DNSなど）
+IPAddress local_IP(192, 168, 0, 20);
+IPAddress gateway(192, 168, 0, 1);
+IPAddress subnet(255, 255, 255, 0);
+IPAddress primaryDNS(8, 8, 8, 8);
 IPAddress secondaryDNS(8, 8, 4, 4);
 
-// サーバーエンドポイント
 const char* serverUrl = "http://192.168.0.2:3000/api/sensor";
 const char* waterLevelUrl = "http://192.168.0.2:3000/api/water-level";
 
-// 温度センサーピン
 #define ONE_WIRE_BUS 13
-int ECPin1 = 34;                // INPUT EC1
-int ECGround = 25;              // OUTPUT
-int ECPower = 33;               // OUTPUT
-
-// 水位センサーのピン設定（仮実装）
+#define ECPower 33
 #define WATER_LEVEL_PIN_1 5
 #define WATER_LEVEL_PIN_2 16
 #define WATER_LEVEL_PIN_3 17
 
-// タイマー
 unsigned long lastSendTime = 0;
-const unsigned long sendInterval = 60000; // 1分
+const unsigned long sendInterval = 60000;
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -63,16 +54,16 @@ void handleRelayCommand(int relay, bool value) {
 void otaTask(void* parameter) {
   for (;;) {
     ArduinoOTA.handle();
-    vTaskDelay(10 / portTICK_PERIOD_MS);  // 10msごとにチェック
+    vTaskDelay(10 / portTICK_PERIOD_MS);
   }
 }
+
 void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED:
       Serial.println("WebSocket connected");
       webSocket.sendTXT("{\"type\":\"register\",\"device\":\"hydrosense-esp32\"}");
       break;
-
     case WStype_TEXT:
       {
         StaticJsonDocument<200> doc;
@@ -84,17 +75,16 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       break;
   }
 }
+
 void setupOTA() {
   ArduinoOTA.setHostname("esp32-relay");
   ArduinoOTA.begin();
 }
 
-
-
-
 void setup() {
   Serial.begin(115200);
   Serial.println("setup start");
+
   if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
     Serial.println("STA Failed to configure");
   }
@@ -103,18 +93,18 @@ void setup() {
   unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    if (millis() - wifiStart > 10000) { // 10秒で諦めてリセット
+    if (millis() - wifiStart > 10000) {
       ESP.restart();
     }
   }
 
-  pinMode(ECPin1, INPUT);
   pinMode(ECPower, OUTPUT);
-  pinMode(ECGround, OUTPUT);
-  digitalWrite(ECGround, LOW);
+  digitalWrite(ECPower, LOW);
   delay(100);
 
   sensors.begin();
+  Wire.begin(21, 22);         // I2Cピンを指定して開始（SDA=21, SCL=22）
+  ads.begin();                // ADS1115の初期化
 
   esp_task_wdt_init(8, true);
   esp_task_wdt_add(NULL);
@@ -122,14 +112,14 @@ void setup() {
   randomSeed(esp_random());
 }
 
-void sendSensorData();     // ← 追加
-void sendWaterLevel();     // ← 追加
+void sendSensorData();
+void sendWaterLevel();
 
 void loop() {
   esp_task_wdt_reset();
 
-  sendSensorData(); // センサーデータを送信
-  sendWaterLevel(); // 水位データを送信
+  sendSensorData();
+  sendWaterLevel();
 
   Serial.flush();
 
@@ -137,23 +127,15 @@ void loop() {
   esp_deep_sleep_start();
 }
 
-// 温度情報の取得
 void getMyTemperature() {
   DeviceAddress deviceAddress;
-
-  sensors.requestTemperatures();  // ★温度変換のリクエスト（重要）
-
+  sensors.requestTemperatures();
   for (int i = 0; i < sensors.getDeviceCount(); i++) {
-
-    if (!sensors.getAddress(deviceAddress, i)) {
-      continue;
-    }
-
+    if (!sensors.getAddress(deviceAddress, i)) continue;
     float temp = sensors.getTempC(deviceAddress);
-
     String serNo = "";
     for (int j = 0; j < 8; j++) {
-      if (deviceAddress[j] < 0x10) serNo += "0";  // ゼロパディング
+      if (deviceAddress[j] < 0x10) serNo += "0";
       serNo += String(deviceAddress[j], HEX);
     }
     if (i == 0) {
@@ -163,39 +145,26 @@ void getMyTemperature() {
       serNo_2 = serNo;
       temp_2 = temp;
     }
-    delay(30); // 30ミリ秒の送信間隔
+    delay(30);
   }
-
   webSocket.loop();
 }
 
-
 void getECvalue(){
-  // EC測定 Start ********************************
   digitalWrite(ECPower, HIGH);
-  ecAnalog = analogRead(ECPin1);
-  delay(2);                     // esp32の計算速度が速いので2ミリ秒待機
-  ecAnalog = analogRead(ECPin1);    // 静電容量の影響を抑えて再度計測
+  delay(2);
+  ecAnalog = ads.readADC_SingleEnded(0); // ADS1115 A0を読み取る
   digitalWrite(ECPower, LOW);
-  // EC測定 End ********************************
 }
 
 void sendSensorData() {
-
   getMyTemperature();
-  // 温度センサーの値を取得
-
   getECvalue();
-  // ECセンサーの値を取得
-
-  //Serial.printf("Temp_1: %.2f, Temp_2: %.2f, EC: %d\n", temp_1, temp_2, ecAnalog);
 
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
     http.begin(serverUrl);
     http.addHeader("Content-Type", "application/json");
-
-    //serNo_2 ="28bd6149f6ce3cd5";
 
     String json = "{";
     json += "\"sensors\":[";
@@ -206,7 +175,6 @@ void sendSensorData() {
     json += "}";
 
     Serial.println("Senddata:" + json);
-    
     int res = http.POST(json);
     String response = http.getString();
     Serial.printf("POST /sensor result: %d\n", res);
@@ -216,14 +184,12 @@ void sendSensorData() {
 }
 
 void sendWaterLevel() {
-  int level1 = digitalRead(WATER_LEVEL_PIN_1); // 0～3の値なら analogRead に変更する
-  int level2 = digitalRead(WATER_LEVEL_PIN_2); // 0～3の値なら analogRead に変更する
-  int level3 = digitalRead(WATER_LEVEL_PIN_3); // 0～3の値なら analogRead に変更する
+  int level1 = digitalRead(WATER_LEVEL_PIN_1);
+  int level2 = digitalRead(WATER_LEVEL_PIN_2);
+  int level3 = digitalRead(WATER_LEVEL_PIN_3);
   Serial.println("Water Level Pins: " + String(level1) + ", " + String(level2) + ", " + String(level3));
-  // 水位センサーの値を取得
 
-  int level = 3;
-  level = level - (level1 + level2 + level3); // 水位センサーの値を反転
+  int level = 3 - (level1 + level2 + level3);
 
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
@@ -236,8 +202,6 @@ void sendWaterLevel() {
     json += "}";
 
     int res = http.POST(json);
-    //Serial.printf("POST /water-level result: %d\n", res);
     http.end();
   }
- 
 }
